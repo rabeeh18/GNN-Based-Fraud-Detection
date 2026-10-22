@@ -1,0 +1,91 @@
+# Default configuration. Every key can be overridden from the CLI with
+#   --set section.key=value     (e.g. --set gat.hidden=128)
+# plus the dedicated flags --use_balance / --seeds / --max_rows / --data_path / --results_dir.
+
+seed: 0                       # used by single-run tools (EDA, sanity overfit)
+seeds: [0, 1, 2, 3, 4]        # multi-seed runs
+use_balance: both             # true | false | both  (both = run each model with and without balance features)
+
+paths:
+  data_path: data/PS_20174392719_1491204439457_log.csv
+  cache_dir: cache
+  results_dir: results
+  figures_dir: figures
+
+data:
+  filter_types: true          # keep only keep_types (fraud exists only in TRANSFER / CASH_OUT)
+  keep_types: [TRANSFER, CASH_OUT]
+  max_rows: null              # read only the first N raw rows (time ordered) for quick runs
+
+split:                        # contiguous temporal ranges on `step`
+  train_end_step: 500         # train: step <= 500
+  val_end_step: 620           # val: 500 < step <= 620, test: step > 620
+  reference_max_step: 743     # used to rescale the boundaries when max_rows truncates the data
+  scale_with_max_rows: true
+  min_frauds_per_split: 20    # fail loudly if any split has fewer frauds
+
+metrics:
+  precision_targets: [0.9, 0.5]   # recall@precision reported for each target
+
+baselines:
+  models: [B0, B0b, B1, FlaggedRule]
+  xgb:
+    n_estimators: 600
+    learning_rate: 0.05
+    max_depth: 6
+    subsample: 0.8
+    colsample_bytree: 0.8
+    min_child_weight: 1
+    early_stopping_rounds: 40
+    scale_pos_weight: auto    # "auto" = min(neg/pos, scale_pos_weight_cap) on the train split, or a number
+    scale_pos_weight_cap: 100
+    device: auto              # auto | cpu | cuda
+    n_jobs: -1
+  rf:
+    n_estimators: 200
+    max_depth: 20
+    min_samples_leaf: 3
+    max_features: sqrt
+    class_weight: balanced_subsample
+    max_train_rows: 600000    # negatives are subsampled (all frauds kept) above this size
+    n_jobs: -1
+
+gat:
+  hidden: 64
+  heads: 2                    # 2-4
+  num_layers: 2
+  dropout: 0.2
+  attn_dropout: 0.0
+  head_hidden: 64
+  fanouts: [10, 5]            # neighbours sampled per hop (one entry per layer)
+  sampling: recent            # recent = most recent past edges | uniform = random past edges
+  batch_size: 1024
+  eval_batch_size: 4096
+  epochs: 30
+  patience: 6                 # early stopping on validation PR-AUC
+  lr: 0.002
+  weight_decay: 1.0e-5
+  loss: bce                   # bce | focal
+  pos_weight: auto            # auto = neg/pos of the epoch's sample (bce only), or a number
+  focal_gamma: 2.0
+  focal_alpha: 0.25
+  train_neg_per_pos: 20       # negatives kept per fraud each epoch (null = use all)
+  val_neg_per_pos: 50         # validation subsample used only for early stopping
+  amp: false                  # mixed precision (CUDA only)
+  grad_clip: 5.0
+  num_attention_examples: 6
+  sanity:
+    n_edges: 2000
+    epochs: 150
+    lr: 0.003
+    batch_size: 500
+    loss_threshold: 0.05
+    ap_threshold: 0.95
+
+eda:
+  verdict:                    # thresholds for the computed "graph structure verdict"
+    min_frac_degree1: 0.80    # sparse if >= this fraction of accounts have degree 1
+    max_mean_degree: 2.0      # sparse if mean degree <= this
+    max_largest_wcc_frac: 0.05  # sparse if the largest weakly connected component holds <= this fraction of accounts
+    max_median_fraud_degree: 2  # sparse if the median degree of fraud-involved accounts <= this
+    min_conditions_sparse: 3  # >= this many conditions true -> SPARSE; >= 2 -> MIXED; else DENSE enough
