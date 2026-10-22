@@ -39,6 +39,14 @@ import subprocess, sys
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "torch_geometric", "xgboost", "pyarrow", "networkx", "pyyaml", "pytest"], check=True)
 import torch, torch_geometric, xgboost
 print("torch", torch.__version__, "| PyG", torch_geometric.__version__, "| xgboost", xgboost.__version__)'''),
+    ("code", HEAD + '''# 4b. OPTIONAL: install pyg-lib matching this runtime's torch/CUDA and cross-check our sampler against
+# PyG's LinkNeighborLoader temporal sampling (checks strictly-past neighbourhoods; see README "Design decisions").
+import subprocess, sys, torch
+cu = "cpu" if torch.version.cuda is None else "cu" + torch.version.cuda.replace(".", "")
+base = torch.__version__.split("+")[0]
+r = subprocess.run([sys.executable, "-m", "pip", "install", "-q", "pyg-lib", "-f", f"https://data.pyg.org/whl/torch-{base}+{cu}.html"])
+print("pyg-lib install exit code:", r.returncode, "(non-zero is fine: the main pipeline does not need it)")
+!python -m pytest tests/test_pyg_sampler.py -q -s'''),
     ("code", HEAD + '''# 5. Download PaySim from Kaggle. Upload your kaggle.json (Kaggle -> Settings -> Create New Token) when asked.
 import os, shutil, subprocess, sys
 if not os.path.exists("data/PS_20174392719_1491204439457_log.csv"):

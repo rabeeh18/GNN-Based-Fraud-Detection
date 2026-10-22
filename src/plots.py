@@ -196,7 +196,7 @@ def plot_neighborhood_graphs(cfg: dict) -> list[Path]:
             ax.axis("off")
         for ax in np.atleast_1d(axes).ravel()[len(items):]:
             ax.axis("off")
-        fig.suptitle("Past-only neighbourhood of flagged frauds (dashed = target; width = attention; red = fraud edge)",
+        fig.suptitle("Past-only neighbourhood of flagged frauds (red nodes = target accounts; edge width = attention; red edge = past fraud)",
                      fontsize=10)
         outs.append(_save(fig, cfg, p.stem.replace("attention_examples", "neighborhood") + ".png"))
     return outs
