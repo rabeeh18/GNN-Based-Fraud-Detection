@@ -49,8 +49,16 @@ All entry points accept `--config`, `--use_balance true|false|both`, `--seeds`, 
 
 ## Run on Colab (GPU)
 
-Open `notebooks/run_on_colab.ipynb` (GPU runtime). It checks the GPU, installs dependencies, downloads PaySim with your
-`kaggle.json`, runs tests, EDA, baselines, the GAT sanity check, GAT training, evaluation and plots, and copies outputs to Drive.
+Open `notebooks/run_on_colab.ipynb` on a T4 GPU runtime. First add your Kaggle API token as a Colab Secret named
+`KAGGLE_API_TOKEN` (key icon in the left sidebar, *Notebook access* on). The notebook clones this repo from GitHub,
+installs dependencies, downloads PaySim, runs tests, a quick trial, EDA, baselines, the GAT sanity checks, GAT training
+(in the background, logged to Drive), evaluation and plots.
+
+Free Colab disconnects, so data, cache, results, figures and logs live on Google Drive
+(`MyDrive/paysim-gnn-fraud-outputs`), set through the `PAYSIM_DATA_PATH`, `PAYSIM_CACHE_DIR`, `PAYSIM_RESULTS_DIR`
+and `PAYSIM_FIGURES_DIR` environment variables (CLI flags still win). `src.baselines` and `src.train_gat` skip
+(model, mode, seed) runs already in `metrics_per_run.csv`, so after a disconnect you just re-run the cell
+(`--rerun` forces a retrain).
 The equivalent commands are listed at the end of this file.
 
 ## Design decisions
@@ -111,14 +119,20 @@ built from `results/metrics_summary.csv`. Paste that table here, together with t
 ## Colab commands, in order
 
 ```bash
-pip install torch_geometric xgboost pyarrow networkx pyyaml pytest kaggle
-kaggle datasets download -d ealaxi/paysim1 -p data --unzip
-D=data/PS_20174392719_1491204439457_log.csv
+git clone https://github.com/rabeeh18/GNN-Based-Fraud-Detection && cd GNN-Based-Fraud-Detection
+pip install torch_geometric xgboost pyarrow networkx pyyaml pytest -U kaggle
+OUT=/content/drive/MyDrive/paysim-gnn-fraud-outputs
+export PAYSIM_DATA_PATH=$OUT/data/PS_20174392719_1491204439457_log.csv PAYSIM_CACHE_DIR=$OUT/cache
+export PAYSIM_RESULTS_DIR=$OUT/results PAYSIM_FIGURES_DIR=$OUT/figures
+export KAGGLE_API_TOKEN=...   # in the notebook: from the Colab Secret, never typed into a cell
+kaggle datasets download -d ealaxi/paysim1 -p /content/paysim_zip --unzip && mkdir -p $OUT/data && cp /content/paysim_zip/*.csv $OUT/data/
 python -m pytest tests -q
-python -m src.eda --data_path $D
-python -m src.baselines --data_path $D --use_balance both --seeds 0 1 2 3 4
-python -m src.train_gat --data_path $D --sanity_overfit
-python -m src.train_gat --data_path $D --use_balance both --seeds 0 1 2 3 4
+python -m src.train_gat --seeds 0 --max_rows 500000 --set gat.epochs=3 --use_balance true --results_dir $OUT/trial/results
+python -m src.eda
+python -m src.baselines --use_balance both --seeds 0 1 2 3 4
+python -m src.train_gat --sanity_overfit --use_balance true
+python -m src.train_gat --sanity_overfit --use_balance false
+nohup python -m src.train_gat --use_balance both --seeds 0 1 2 3 4 >> $OUT/logs/train_gat.log 2>&1 &
 python -m src.evaluate
 python -m src.error_analysis --seeds 0 --precision 0.9
 python -m src.plots

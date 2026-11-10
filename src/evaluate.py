@@ -75,6 +75,15 @@ def save_run(results_dir: str | Path, row: dict, tx_ids: np.ndarray, y_test: np.
     new.sort_values(["mode", "model", "seed"]).to_csv(p, index=False)
 
 
+def completed_runs(results_dir: str | Path) -> set[tuple[str, str, int]]:
+    """(model, mode, seed) triples already recorded in metrics_per_run.csv (used to resume after a disconnect)."""
+    p = Path(results_dir) / PER_RUN
+    if not p.exists():
+        return set()
+    runs = pd.read_csv(p)
+    return {(str(m), str(md), int(s)) for m, md, s in zip(runs["model"], runs["mode"], runs["seed"])}
+
+
 METRIC_COLS = ["pr_auc", "recall_at_p90", "recall_at_p50", "precision", "recall", "f1"]
 
 

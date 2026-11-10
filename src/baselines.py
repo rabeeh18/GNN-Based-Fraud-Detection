@@ -14,7 +14,7 @@ import xgboost as xgb
 from sklearn.ensemble import RandomForestClassifier
 
 from .data import Dataset, prepare_dataset
-from .evaluate import evaluate_run, save_run, summarize
+from .evaluate import completed_runs, evaluate_run, save_run, summarize
 from .splits import TEST, TRAIN, VAL
 from .utils import balance_modes, build_parser, get_logger, mode_name, resolve_config, seed_everything
 
@@ -75,6 +75,7 @@ def run_baselines(cfg: dict, ds: Dataset | None = None) -> None:
     targets = cfg["metrics"]["precision_targets"]
     tx = ds.meta["tx_id"].to_numpy()
     rdir = cfg["paths"]["results_dir"]
+    done = set() if cfg.get("rerun") else completed_runs(rdir)
     for use_balance in balance_modes(cfg):
         mode = mode_name(use_balance)
         mats: dict[bool, np.ndarray] = {}
@@ -88,10 +89,16 @@ def run_baselines(cfg: dict, ds: Dataset | None = None) -> None:
                          row["recall"], row["precision"])
                 continue
             kind, with_graph = MODEL_SPECS[model_name]
+            todo = [sd for sd in cfg["seeds"] if (model_name, mode, sd) not in done]
+            if len(todo) < len(cfg["seeds"]):
+                log.info("[%s] %s: skipping seeds %s (already in metrics_per_run.csv; --rerun to redo)", mode,
+                         model_name, [sd for sd in cfg["seeds"] if sd not in todo])
+            if not todo:
+                continue
             if with_graph not in mats:
                 mats[with_graph], _ = ds.matrices(use_balance, with_graph)
             X = mats[with_graph]
-            for seed in cfg["seeds"]:
+            for seed in todo:
                 seed_everything(seed)
                 t0 = time.time()
                 if kind == "xgb":

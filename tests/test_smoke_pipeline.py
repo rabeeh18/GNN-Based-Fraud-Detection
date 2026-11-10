@@ -46,6 +46,39 @@ def test_pipeline(cfg):
     assert analyse(cfg, "balance", 0, 0.5) is not None
 
 
+def test_resume_skips_finished_runs(cfg, monkeypatch):
+    """A second run must not retrain (model, mode, seed) triples already in metrics_per_run.csv."""
+    import src.baselines as bl
+    import src.train_gat as tg
+    from src.data import prepare_dataset
+
+    ds = prepare_dataset(cfg)
+    run_baselines, run_gat = bl.run_baselines, tg.run_gat
+    run_baselines(cfg, ds)        # make sure the results exist (the test may run on its own)
+    run_gat(cfg, ds)
+
+    def boom(*a, **k):
+        raise AssertionError("a finished run was retrained")
+
+    monkeypatch.setattr(bl, "fit_xgb", boom)
+    monkeypatch.setattr(bl, "fit_rf", boom)
+    monkeypatch.setattr(tg, "train_one", boom)
+    run_baselines(cfg, ds)
+    run_gat(cfg, ds)
+    with pytest.raises(AssertionError):
+        run_gat({**cfg, "rerun": True}, ds)
+
+
+def test_env_paths(monkeypatch, tmp_path):
+    from src.utils import build_parser, resolve_config
+
+    monkeypatch.setenv("PAYSIM_RESULTS_DIR", str(tmp_path / "r"))
+    cfg = resolve_config(build_parser("t").parse_args([]))
+    assert cfg["paths"]["results_dir"] == str(tmp_path / "r")
+    cfg = resolve_config(build_parser("t").parse_args(["--results_dir", str(tmp_path / "x")]))
+    assert cfg["paths"]["results_dir"] == str(tmp_path / "x")
+
+
 def test_sanity_overfit_passes(cfg):
     from src.train_gat import sanity_overfit
 

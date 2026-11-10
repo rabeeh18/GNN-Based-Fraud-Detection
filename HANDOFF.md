@@ -11,7 +11,7 @@ an end-to-end smoke run works. **No real PaySim data has been used and there are
 The README results table is intentionally empty.
 
 Never run so far:
-- `notebooks/run_on_colab.ipynb` (uses `google.colab` APIs; the uploaded zip must contain a top-level `paysim-gnn-fraud/` folder)
+- `notebooks/run_on_colab.ipynb` (clones the repo from GitHub; Kaggle token from the Colab Secret `KAGGLE_API_TOKEN`; data/cache/results on Drive)
 - `scripts/check_pyg_sampler.py` / `tests/test_pyg_sampler.py` (need `pyg-lib`; no Windows/CPU wheel was available, so the test is skipped locally)
 - Any GPU run, and any run on the real ~2.8M-edge graph (runtime and memory are unmeasured estimates)
 
@@ -20,11 +20,15 @@ Never run so far:
 ```bash
 pip install -r requirements.txt
 python scripts/make_synthetic_paysim.py
-python -m pytest tests -q          # expect 14 passed, 1 skipped
+python -m pytest tests -q          # expect 16 passed, 1 skipped
 ```
 
 `data/`, `cache/`, `results/` and `figures/` are gitignored and empty after a clone.
-The real data (Kaggle `ealaxi/paysim1`) is downloaded on Colab with a `kaggle.json`.
+The real data (Kaggle `ealaxi/paysim1`) is downloaded on Colab with the `KAGGLE_API_TOKEN` Colab Secret
+(a new-style `KGAT_...` token; needs a recent `kaggle` CLI) and stored on Google Drive.
+
+Colab resume: paths come from `PAYSIM_*_DIR` / `PAYSIM_DATA_PATH` env vars (set by the notebook to Drive), and
+`src.baselines` / `src.train_gat` skip runs already in `metrics_per_run.csv` (`--rerun` to force).
 
 ## Next steps
 

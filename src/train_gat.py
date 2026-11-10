@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from sklearn.metrics import average_precision_score
 
 from .data import Dataset, prepare_dataset
-from .evaluate import evaluate_run, save_run, summarize
+from .evaluate import completed_runs, evaluate_run, save_run, summarize
 from .gat import EdgeGATv2, explain, focal_loss, make_batch, predict_scores
 from .graph_build import TemporalGraph
 from .splits import TEST, TRAIN, VAL
@@ -139,7 +139,7 @@ def sanity_overfit(cfg: dict, ds: Dataset | None = None) -> dict:
            "loss_threshold": sc["loss_threshold"], "ap_threshold": sc["ap_threshold"], "passed": ok}
     log.info("sanity overfit %s: final loss %.4f (< %.3g), train AP %.4f (> %.3g)", "PASSED" if ok else "FAILED",
              last, sc["loss_threshold"], ap, sc["ap_threshold"])
-    with open(ensure_dir(cfg["paths"]["results_dir"]) / "sanity_overfit.json", "w") as f:
+    with open(ensure_dir(cfg["paths"]["results_dir"]) / f"sanity_overfit_{mode_name(use_balance)}.json", "w") as f:
         json.dump(res, f, indent=2)
     return res
 
@@ -157,11 +157,18 @@ def run_gat(cfg: dict, ds: Dataset | None = None) -> None:
     tr, va, te = (np.flatnonzero(ds.mask(s)) for s in (TRAIN, VAL, TEST))
     rdir = Path(cfg["paths"]["results_dir"])
     targets = cfg["metrics"]["precision_targets"]
+    done = set() if cfg.get("rerun") else completed_runs(rdir)
     for use_balance in balance_modes(cfg):
         mode = mode_name(use_balance)
+        todo = [sd for sd in cfg["seeds"] if ("GAT", mode, sd) not in done]
+        if len(todo) < len(cfg["seeds"]):
+            log.info("[%s] GAT: skipping seeds %s (already in metrics_per_run.csv; --rerun to redo)", mode,
+                     [sd for sd in cfg["seeds"] if sd not in todo])
+        if not todo:
+            continue
         X, pre = ds.matrices(use_balance, True)
         Xt = torch.from_numpy(X).to(device)
-        for k, seed in enumerate(cfg["seeds"]):
+        for seed in todo:
             t0 = time.time()
             ckpt = rdir / "checkpoints" / f"gat_{mode}_seed{seed}.pt"
             model, info = train_one(cfg, graph, Xt, y, tr, va, seed, device, ckpt, tag=f"[{mode}]")
@@ -173,15 +180,15 @@ def run_gat(cfg: dict, ds: Dataset | None = None) -> None:
             torch.save({"state_dict": model.state_dict(), "threshold": row["threshold"], "seed": seed,
                         "columns": pre.columns, "scaler_mean": pre.mean_, "scaler_std": pre.std_,
                         "gat_config": gc, "val_pr_auc": row["val_pr_auc"]}, ckpt)
-            save_run(rdir, row, tx[te], y[te], s_te)
-            log.info("[%s] GAT seed %d: PR-AUC %.4f R@P90 %.4f F1 %.4f", mode, seed, row["pr_auc"],
-                     row["recall_at_p90"], row["f1"])
-            if k == 0 and gc["num_attention_examples"] > 0:
+            if seed == cfg["seeds"][0] and gc["num_attention_examples"] > 0:
                 fraud_te = np.flatnonzero(y[te] == 1)
                 top = fraud_te[np.argsort(-s_te[fraud_te])][: gc["num_attention_examples"]]
                 ex = explain(model, graph, Xt, te[top], s_te[top], y, tx, gc["fanouts"], gc["sampling"])
                 with open(rdir / f"attention_examples_GAT_{mode}_seed{seed}.json", "w") as f:
                     json.dump({"mode": mode, "seed": seed, "examples": ex}, f)
+            save_run(rdir, row, tx[te], y[te], s_te)              # last: marks the run as done
+            log.info("[%s] GAT seed %d: PR-AUC %.4f R@P90 %.4f F1 %.4f", mode, seed, row["pr_auc"],
+                     row["recall_at_p90"], row["f1"])
     summarize(rdir)
 
 

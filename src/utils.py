@@ -66,6 +66,8 @@ def build_parser(description: str) -> argparse.ArgumentParser:
     p.add_argument("--results_dir", default=None)
     p.add_argument("--figures_dir", default=None)
     p.add_argument("--cache_dir", default=None)
+    p.add_argument("--rerun", action="store_true",
+                   help="retrain (model, mode, seed) runs already listed in metrics_per_run.csv")
     p.add_argument("--set", dest="overrides", action="append", default=[],
                    help="generic override section.key=value (YAML-parsed), repeatable")
     return p
@@ -89,6 +91,13 @@ def resolve_config(args: argparse.Namespace) -> dict:
     """Load the YAML config and apply CLI overrides. Relative paths are resolved against the repo root."""
     with open(args.config, "r", encoding="utf-8") as f:
         cfg = copy.deepcopy(yaml.safe_load(f))
+    # Environment variables (e.g. PAYSIM_RESULTS_DIR=/content/drive/MyDrive/...) override the YAML paths;
+    # explicit CLI flags override both. Used on Colab to write straight to Google Drive.
+    for key in ("data_path", "cache_dir", "results_dir", "figures_dir"):
+        env = os.environ.get(f"PAYSIM_{key.upper()}")
+        if env:
+            cfg["paths"][key] = env
+    cfg["rerun"] = bool(getattr(args, "rerun", False))
     if args.use_balance is not None:
         cfg["use_balance"] = args.use_balance
     if args.seeds is not None:
