@@ -144,8 +144,17 @@ def sanity_overfit(cfg: dict, ds: Dataset | None = None) -> dict:
     return res
 
 
-def run_gat(cfg: dict, ds: Dataset | None = None) -> None:
-    """Multi-seed GAT training/evaluation for each feature mode; saves checkpoints, metrics, predictions."""
+def run_gat(cfg: dict, ds: Dataset | None = None, no_graph: bool = False) -> None:
+    """Multi-seed GAT training/evaluation for each feature mode; saves checkpoints, metrics, predictions.
+
+    ``no_graph=True`` trains the identical network with no sampled neighbours (``fanouts=[]``), recorded as
+    model ``MLP``: the edge head then sees only the target edge's own features, so GAT vs MLP isolates what
+    message passing over past transactions adds.
+    """
+    name = "MLP" if no_graph else "GAT"
+    if no_graph:
+        cfg = copy.deepcopy(cfg)
+        cfg["gat"]["fanouts"], cfg["gat"]["num_attention_examples"] = [], 0
     ds = ds or prepare_dataset(cfg)
     device = get_device()
     log.info("device: %s", device)
@@ -160,9 +169,9 @@ def run_gat(cfg: dict, ds: Dataset | None = None) -> None:
     done = set() if cfg.get("rerun") else completed_runs(rdir)
     for use_balance in balance_modes(cfg):
         mode = mode_name(use_balance)
-        todo = [sd for sd in cfg["seeds"] if ("GAT", mode, sd) not in done]
+        todo = [sd for sd in cfg["seeds"] if (name, mode, sd) not in done]
         if len(todo) < len(cfg["seeds"]):
-            log.info("[%s] GAT: skipping seeds %s (already in metrics_per_run.csv; --rerun to redo)", mode,
+            log.info("[%s] %s: skipping seeds %s (already in metrics_per_run.csv; --rerun to redo)", mode, name,
                      [sd for sd in cfg["seeds"] if sd not in todo])
         if not todo:
             continue
@@ -170,11 +179,11 @@ def run_gat(cfg: dict, ds: Dataset | None = None) -> None:
         Xt = torch.from_numpy(X).to(device)
         for seed in todo:
             t0 = time.time()
-            ckpt = rdir / "checkpoints" / f"gat_{mode}_seed{seed}.pt"
+            ckpt = rdir / "checkpoints" / f"{name.lower()}_{mode}_seed{seed}.pt"
             model, info = train_one(cfg, graph, Xt, y, tr, va, seed, device, ckpt, tag=f"[{mode}]")
             s_va = predict_scores(model, graph, Xt, va, gc["fanouts"], gc["sampling"], gc["eval_batch_size"], seed)
             s_te = predict_scores(model, graph, Xt, te, gc["fanouts"], gc["sampling"], gc["eval_batch_size"], seed)
-            row = evaluate_run("GAT", mode, seed, y[va], s_va, y[te], s_te, targets,
+            row = evaluate_run(name, mode, seed, y[va], s_va, y[te], s_te, targets,
                                train_seconds=round(time.time() - t0, 1), n_features=X.shape[1],
                                best_iteration=len(info["history"]))
             torch.save({"state_dict": model.state_dict(), "threshold": row["threshold"], "seed": seed,
@@ -187,7 +196,7 @@ def run_gat(cfg: dict, ds: Dataset | None = None) -> None:
                 with open(rdir / f"attention_examples_GAT_{mode}_seed{seed}.json", "w") as f:
                     json.dump({"mode": mode, "seed": seed, "examples": ex}, f)
             save_run(rdir, row, tx[te], y[te], s_te)              # last: marks the run as done
-            log.info("[%s] GAT seed %d: PR-AUC %.4f R@P90 %.4f F1 %.4f", mode, seed, row["pr_auc"],
+            log.info("[%s] %s seed %d: PR-AUC %.4f R@P90 %.4f F1 %.4f", mode, name, seed, row["pr_auc"],
                      row["recall_at_p90"], row["f1"])
     summarize(rdir)
 
@@ -198,11 +207,12 @@ def main() -> None:
         sys.stdout.reconfigure(encoding="utf-8")
     p = build_parser("Train and evaluate the GATv2 edge classifier")
     p.add_argument("--sanity_overfit", action="store_true", help="overfit a tiny subset and exit")
+    p.add_argument("--no_graph", action="store_true", help="MLP control: same network, no sampled neighbours")
     args = p.parse_args()
     cfg = resolve_config(args)
     if args.sanity_overfit:
         sys.exit(0 if sanity_overfit(cfg)["passed"] else 1)
-    run_gat(cfg)
+    run_gat(cfg, no_graph=args.no_graph)
 
 
 if __name__ == "__main__":

@@ -94,6 +94,9 @@ subprocess.Popen(f"nohup python -m src.train_gat --use_balance both --seeds 0 1 
 print("started; follow it with the next cell")'''),
     ("code", HEAD + '''# 10b. Progress of the background GAT run (re-run this cell to refresh)
 !tail -n 15 $OUT/logs/train_gat.log; pgrep -f "src.train_gat" >/dev/null && echo "--- still running" || echo "--- not running"'''),
+    ("code", HEAD + '''# 10c. MLP control (same network, no neighbours) and the Elliptic experiment (downloads Elliptic via PyG)
+!python -m src.train_gat --use_balance both --seeds 0 1 2 3 4 --no_graph
+!python -m src.elliptic --seeds 0 1 2 3 4'''),
     ("code", HEAD + '''# 11. Aggregate seeds, error analysis, figures
 !python -m src.evaluate
 !python -m src.error_analysis --seeds 0 --precision 0.9

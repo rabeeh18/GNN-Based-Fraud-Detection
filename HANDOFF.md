@@ -1,60 +1,65 @@
 # Handoff
 
 State of the project for whoever (person or assistant) picks it up after a fresh clone.
-Read `README.md` first for design decisions; this file lists status and next steps.
+Read `README.md` first for the results and design decisions; this file lists status and next steps.
 
 ## Status
 
-All eight build phases are done and committed. The code has only been run on **synthetic** data
-(`scripts/make_synthetic_paysim.py`) on a Windows CPU machine: tests pass (14 passed, 1 skipped),
-an end-to-end smoke run works. **No real PaySim data has been used and there are no real results yet.**
-The README results table is intentionally empty.
+Done. All experiments have been run on the **real data** on a Windows laptop (Python 3.12, torch 2.15.0+cu132,
+RTX 5050 Laptop GPU, 16 GB RAM), and the README holds the final tables, figures and conclusions.
 
-Never run so far:
-- `notebooks/run_on_colab.ipynb` (clones the repo from GitHub; Kaggle token from the Colab Secret `KAGGLE_API_TOKEN`; data/cache/results on Drive)
-- `scripts/check_pyg_sampler.py` / `tests/test_pyg_sampler.py` (need `pyg-lib`; no Windows/CPU wheel was available, so the test is skipped locally)
-- Any GPU run, and any run on the real ~2.8M-edge graph (runtime and memory are unmeasured estimates)
+- PaySim: EDA, baselines B0/B0b/B1 + `isFlaggedFraud`, GAT, MLP control; 5 seeds; both feature modes.
+- Elliptic (second dataset): B0, B0b, B1, MLP, GAT; 5 seeds; GAT/MLP settings tuned on validation only.
+- Sanity overfit passes in both PaySim modes (`results/sanity_overfit_{balance,nobalance}.json`).
+- Tests: `python -m pytest tests -q` gives 20 passed, 1 skipped (the PyG cross-check, see below).
+
+Headline: without balance features, GAT 0.652 ± 0.004 PR-AUC vs B1 0.635 ± 0.007 on PaySim (ahead in 5/5 paired
+seeds, but B1 is better on validation); on Elliptic the trees win (B1 0.789) and the GAT (0.605) is below its MLP
+control (0.718).
+
+`data/`, `cache/`, `results/`, `figures/` and `logs/` are gitignored. The figures used by the README are copied into
+`docs/figures/`. Raw results lived only on the laptop; rerun the pipeline to regenerate them (commands at the end of
+`README.md`, about one hour in total on a laptop GPU).
 
 ## Setup after cloning
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt     # plus the CUDA build of torch from pytorch.org for a GPU
 python scripts/make_synthetic_paysim.py
-python -m pytest tests -q          # expect 16 passed, 1 skipped
+python -m pytest tests -q          # expect 20 passed, 1 skipped
 ```
 
-`data/`, `cache/`, `results/` and `figures/` are gitignored and empty after a clone.
-The real data (Kaggle `ealaxi/paysim1`) is downloaded on Colab with the `KAGGLE_API_TOKEN` Colab Secret
-(a new-style `KGAT_...` token; needs a recent `kaggle` CLI) and stored on Google Drive.
+PaySim: download the zip from Kaggle (`ealaxi/paysim1`) and unzip the CSV into `data/`
+(on Colab the notebook uses the `KAGGLE_API_TOKEN` Colab Secret instead). Elliptic is downloaded by PyG into
+`data/elliptic/` on first use of `python -m src.elliptic`.
 
-Colab resume: paths come from `PAYSIM_*_DIR` / `PAYSIM_DATA_PATH` env vars (set by the notebook to Drive), and
-`src.baselines` / `src.train_gat` skip runs already in `metrics_per_run.csv` (`--rerun` to force).
+Resume: `src.baselines`, `src.train_gat` and `src.elliptic` skip (model, mode, seed) runs already in
+`metrics_per_run.csv` (`--rerun` to force). Paths can come from `PAYSIM_*_DIR` / `PAYSIM_DATA_PATH` env vars
+(used by the Colab notebook to write to Google Drive).
 
-## Next steps
+## Changes made while running on real data (and why)
 
-1. Run `notebooks/run_on_colab.ipynb` on a GPU runtime. Try one seed first:
-   `--seeds 0 --max_rows 500000 --set gat.epochs=3`, then the full run (5 seeds, both feature modes).
-2. Run the PyG cross-check (notebook cell 4b) and confirm PyG's temporal filter semantics
-   (believed inclusive, i.e. `time <= seed_time`, hence `edge_label_time = step - 1`; unverified).
-3. Run `python -m src.train_gat --sanity_overfit` also with `--use_balance false`
-   (the default run only covers the first mode, which is nearly separable).
-4. Paste the generated table (`python -m src.evaluate`) and the EDA verdict into the README. Write conclusions only after results exist.
-5. Optional: add the Colab MCP (`@google/colab-mcp`) to drive Colab from the assistant; not set up yet.
+- XGBoost early-stopping patience 40 -> 100: several seeds stopped after 2-8 trees on the noisy validation PR-AUC
+  (one Elliptic B1 seed scored 0.36). All reported XGBoost numbers use 100.
+- GAT sanity overfit: 150 epochs at lr 0.003 -> 2000 epochs at lr 0.01. Without balance features the network
+  memorises the subset slowly (XGBoost memorises it perfectly, so the data are separable).
+- Added the MLP control (`--no_graph` for PaySim, model `MLP` in `src.elliptic`): same network, no neighbours.
+- Sanity results are written per mode (`sanity_overfit_<mode>.json`) instead of overwriting one file.
 
-## Things to check on the real data
+## Open items
 
-- Fraud rate and fraud count per split (see the printed split table and `results/eda_fraud_over_time.csv`).
-  If late-step volume drops while fraud counts stay flat, the test fraud rate will be much higher than train's
-  and the validation-tuned F1 threshold may transfer poorly.
-- `day` and the "no history" fill (`time_since_last = step`) encode absolute time; test steps lie outside the train range.
-- Library versions: development used pandas 3.0, numpy 1.26, torch 2.13, PyG 2.8.1; Colab will differ. Run `pytest` first.
-- Free-Colab RAM (about 12 GB) during feature construction (5.6M-row event log); use `--max_rows` first.
-- GAT early stopping uses a negative-subsampled validation set; thresholds use the full validation split.
-- GPU scatter ops are not fully deterministic, so reruns can differ slightly.
+1. PyG cross-check (`scripts/check_pyg_sampler.py`, `tests/test_pyg_sampler.py`) is still unverified: `pyg-lib` has no
+   Windows wheel for torch 2.15. It runs on Colab (notebook cell 4b) or Linux.
+2. Validation and test disagree on PaySim (B1 better on validation, GAT on test). The splits' fraud rates differ a lot
+   (1.5% vs 3.6%). A rolling-origin evaluation (several train/test cut points) would settle whether the GAT gain is real.
+3. The PaySim GAT was not tuned; a validation-only grid like `scripts/tune_elliptic.py` would make the comparison
+   symmetric with Elliptic.
+4. The Colab notebook (`notebooks/run_on_colab.ipynb`) has not been run end to end; everything was run locally instead.
 
 ## Known deviations and limitations
 
 - Custom numpy time-aware sampler (`src/graph_build.py`) instead of PyG `LinkNeighborLoader`; semantics: only edges with `step < t`, target excluded.
 - Strict "step < t" visibility hides same-step history (for example a fraud transfer and its cash-out within one hour).
+- GPU scatter ops are not fully deterministic, so reruns can differ slightly.
 - Commit history: phases 3-4 and 5-6 each share a commit, not one commit per phase.
 - Git rule for this repo: no attribution lines, no mention of AI tools in commit messages, authors or file contents; commits use the user's own git identity.

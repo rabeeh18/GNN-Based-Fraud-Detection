@@ -15,8 +15,9 @@ from .utils import build_parser, ensure_dir, get_logger, mode_name, resolve_conf
 
 log = get_logger()
 RED, BLUE, GREY = "#d62728", "#1f77b4", "#7f7f7f"
-MODEL_COLORS = {"B0": "#7f7f7f", "B0b": "#bcbd22", "B1": "#2ca02c", "GAT": "#9467bd", "FlaggedRule": "#8c564b"}
-MODEL_ORDER = ["FlaggedRule", "B0", "B0b", "B1", "GAT"]
+MODEL_COLORS = {"B0": "#7f7f7f", "B0b": "#bcbd22", "B1": "#2ca02c", "MLP": "#ff7f0e", "GAT": "#9467bd",
+                "FlaggedRule": "#8c564b"}
+MODEL_ORDER = ["FlaggedRule", "B0", "B0b", "B1", "MLP", "GAT"]
 MODE_TITLE = {"balance": "with balance features", "nobalance": "without balance features"}
 
 
@@ -104,13 +105,18 @@ def plot_pr_curves(cfg: dict) -> list[Path]:
             if not p.exists():
                 continue
             pr = pd.read_parquet(p)
-            prec, rec, _ = precision_recall_curve(pr["y_true"], pr["score"])
             ap = float(sub.loc[sub["seed"] == seed, "pr_auc"].iloc[0])
+            if pr["score"].nunique() <= 2:          # a yes/no rule is one operating point, not a curve
+                r = sub.loc[sub["seed"] == seed].iloc[0]
+                ax.plot(r["recall"], r["precision"], "o", ms=7, color=MODEL_COLORS.get(model),
+                        label=f"{model} (P {r['precision']:.2f}, R {r['recall']:.3f})")
+                continue
+            prec, rec, _ = precision_recall_curve(pr["y_true"], pr["score"])
             ax.plot(rec, prec, color=MODEL_COLORS.get(model), label=f"{model} (AP {ap:.3f})")
         ax.set_xlabel("recall")
         ax.set_ylabel("precision")
         ax.set_ylim(0, 1.02)
-        ax.set_title(f"Test PR curves, {MODE_TITLE.get(mode, mode)} (seed-min)")
+        ax.set_title(f"Test PR curves, {MODE_TITLE.get(mode, mode)} (seed 0)")
         ax.legend(loc="lower left")
         outs.append(_save(fig, cfg, f"pr_curves_{mode}.png"))
     return outs
@@ -202,12 +208,39 @@ def plot_neighborhood_graphs(cfg: dict) -> list[Path]:
     return outs
 
 
+def plot_elliptic(cfg: dict) -> Path:
+    """Elliptic: test PR-AUC per model (mean +- std over seeds) and illicit recall per test time step."""
+    rd = _res(cfg) / "elliptic"
+    if not (rd / "metrics_per_run.csv").exists():
+        raise FileNotFoundError(f"{rd} has no results; run python -m src.elliptic")
+    runs = pd.read_csv(rd / "metrics_per_run.csv")
+    steps = pd.read_csv(rd / "per_step.csv")
+    models = [m for m in MODEL_ORDER if m in set(runs["model"])]
+    fig, ax = plt.subplots(1, 2, figsize=(12, 4), gridspec_kw={"width_ratios": [1, 1.6]})
+    g = runs.groupby("model")["pr_auc"].agg(["mean", "std"]).reindex(models)
+    ax[0].bar(models, g["mean"], yerr=g["std"].fillna(0), capsize=3, color=[MODEL_COLORS[m] for m in models])
+    ax[0].set_ylim(0, 1)
+    ax[0].set_title("Elliptic: test PR-AUC (mean ± std, 5 seeds)")
+    per = steps.groupby(["model", "step"])[["tp", "illicit"]].sum()
+    per = (per["tp"] / per["illicit"].where(per["illicit"] > 0)).unstack(0)
+    for m in models:
+        ax[1].plot(per.index, per[m], "-o", ms=3, color=MODEL_COLORS[m], label=m)
+    ax[1].axvline(43, color=GREY, ls="--")
+    ax[1].text(43.2, 0.93, "dark-market shutdown", fontsize=8, rotation=90, color=GREY, va="top")
+    ax[1].set_xlabel("test time step")
+    ax[1].set_ylabel("illicit recall (validation threshold)")
+    ax[1].set_ylim(0, 1)
+    ax[1].set_title("Elliptic: recall per time step, all models collapse after step 43")
+    ax[1].legend(fontsize=8)
+    return _save(fig, cfg, "elliptic_results.png")
+
+
 def main() -> None:
     """CLI entry point: regenerate every figure whose inputs exist."""
     args = build_parser("Generate result figures from results/").parse_args()
     cfg = resolve_config(args)
     jobs = [plot_fraud_by_type, plot_fraud_over_time, plot_degree_distributions, plot_pr_curves,
-            plot_summary_bars, plot_confusion_matrices, plot_neighborhood_graphs]
+            plot_summary_bars, plot_confusion_matrices, plot_neighborhood_graphs, plot_elliptic]
     for job in jobs:
         try:
             job(cfg)

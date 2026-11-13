@@ -36,7 +36,7 @@ baselines:
     subsample: 0.8
     colsample_bytree: 0.8
     min_child_weight: 1
-    early_stopping_rounds: 40
+    early_stopping_rounds: 100  # 40 let some seeds stop after 2-8 trees on the noisy validation PR-AUC
     scale_pos_weight: auto    # "auto" = min(neg/pos, scale_pos_weight_cap) on the train split, or a number
     scale_pos_weight_cap: 100
     device: auto              # auto | cpu | cuda
@@ -76,8 +76,8 @@ gat:
   num_attention_examples: 6
   sanity:
     n_edges: 2000
-    epochs: 150
-    lr: 0.003
+    epochs: 2000              # without balance columns the model memorises slowly (loss ~0.06 after 1500 epochs)
+    lr: 0.01
     batch_size: 500
     loss_threshold: 0.05
     ap_threshold: 0.95
@@ -89,3 +89,22 @@ eda:
     max_largest_wcc_frac: 0.05  # sparse if the largest weakly connected component holds <= this fraction of accounts
     max_median_fraud_degree: 2  # sparse if the median degree of fraud-involved accounts <= this
     min_conditions_sparse: 3  # >= this many conditions true -> SPARSE; >= 2 -> MIXED; else DENSE enough
+
+elliptic:                     # second dataset (python -m src.elliptic); results go to <results_dir>/elliptic
+  data_dir: data/elliptic     # PyG downloads the raw CSVs here on first use
+  train_end_step: 29          # train: steps 1-29, val: 30-34, test: 35-49 (standard 34/15 boundary)
+  val_end_step: 34
+  models: [B0, B0b, B1, MLP, GAT]
+  gat:                        # chosen by scripts/tune_elliptic.py on validation PR-AUC (seeds 0-1); MLP overrides below
+    hidden: 128
+    heads: 2
+    num_layers: 2
+    dropout: 0.2
+    lr: 0.001
+    weight_decay: 1.0e-4
+    epochs: 1000
+    patience: 100
+  mlp:                        # same network without edges; only the tuned values that differ from gat
+    hidden: 64
+    dropout: 0.5
+    lr: 0.003

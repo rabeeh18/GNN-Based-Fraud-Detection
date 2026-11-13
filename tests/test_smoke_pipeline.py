@@ -83,3 +83,24 @@ def test_sanity_overfit_passes(cfg):
     from src.train_gat import sanity_overfit
 
     assert sanity_overfit(cfg)["passed"]
+
+
+def test_mlp_control_uses_no_neighbours(cfg, monkeypatch):
+    """--no_graph trains the same network with no sampled past edges and records it as model MLP."""
+    import src.gat as gat
+    import src.train_gat as tg
+    from src.data import prepare_dataset
+
+    seen = []
+    real = gat.make_batch
+
+    def spy(*a, **k):
+        b = real(*a, **k)
+        seen.append(b["_n_edges"])
+        return b
+
+    monkeypatch.setattr(tg, "make_batch", spy)
+    tg.run_gat(cfg, prepare_dataset(cfg), no_graph=True)
+    assert seen and max(seen) == 0
+    runs = pd.read_csv(f"{cfg['paths']['results_dir']}/metrics_per_run.csv")
+    assert "MLP" in set(runs["model"])
