@@ -110,3 +110,12 @@ def test_c_split_fails_loudly_on_too_few_frauds():
     y[:100] = 1            # all frauds in train
     with pytest.raises(SplitError):
         check_splits(step, y, make_split(step, 500, 620), min_frauds=5)
+
+
+def test_c_test_end_step_excludes_later_rows():
+    step = np.arange(1, 744)
+    split = make_split(step, 300, 380, 460)
+    assert (split[step > 460] == -1).all() and (split[(step > 380) & (step <= 460)] == 2).all()
+    assert (split[step <= 300] == 0).all() and (split[(step > 300) & (step <= 380)] == 1).all()
+    with pytest.raises(SplitError):
+        make_split(step, 300, 380, 380)

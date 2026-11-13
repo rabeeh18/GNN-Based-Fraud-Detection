@@ -104,3 +104,19 @@ def test_mlp_control_uses_no_neighbours(cfg, monkeypatch):
     assert seen and max(seen) == 0
     runs = pd.read_csv(f"{cfg['paths']['results_dir']}/metrics_per_run.csv")
     assert "MLP" in set(runs["model"])
+
+
+def test_rolling_origin_window(cfg, monkeypatch):
+    """One rolling-origin window on synthetic data: runs B0/B1/MLP/GAT and writes the paired summary."""
+    import scripts.rolling_origin as ro
+    from src.data import prepare_dataset
+
+    monkeypatch.setattr(ro, "WINDOW", 120)
+    c = ro.window_cfg(cfg, 450)
+    ds = prepare_dataset(c)
+    assert (ds.meta["step"][ds.split == 2] <= 690).all() and (ds.split == -1).any()
+    ro.run_baselines(c, ds)
+    ro.run_gat(c, ds, no_graph=True)
+    ro.run_gat(c, ds)
+    s = ro.summarize_windows(cfg, [450])
+    assert set(s["model"]) >= {"B0", "B1", "MLP", "GAT", "GAT-B1 (test)", "GAT-B1 (val)"}

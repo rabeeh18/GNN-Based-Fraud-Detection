@@ -11,11 +11,12 @@ RTX 5050 Laptop GPU, 16 GB RAM), and the README holds the final tables, figures 
 - PaySim: EDA, baselines B0/B0b/B1 + `isFlaggedFraud`, GAT, MLP control; 5 seeds; both feature modes.
 - Elliptic (second dataset): B0, B0b, B1, MLP, GAT; 5 seeds; GAT/MLP settings tuned on validation only.
 - Sanity overfit passes in both PaySim modes (`results/sanity_overfit_{balance,nobalance}.json`).
-- Tests: `python -m pytest tests -q` gives 20 passed, 1 skipped (the PyG cross-check, see below).
+- Tests: `python -m pytest tests -q` gives 22 passed, 1 skipped (the PyG cross-check, see below).
 
-Headline: without balance features, GAT 0.652 ± 0.004 PR-AUC vs B1 0.635 ± 0.007 on PaySim (ahead in 5/5 paired
-seeds, but B1 is better on validation); on Elliptic the trees win (B1 0.789) and the GAT (0.605) is below its MLP
-control (0.718).
+Headline: graph features help a lot (B0 0.49 -> B1 0.64 PR-AUC on PaySim without balance features), but the GAT does
+not reliably beat B1. It wins the main PaySim split (0.652 vs 0.635, 5/5 seeds) but loses all three earlier
+rolling-origin windows (`scripts/rolling_origin.py`) and every validation comparison; on Elliptic the trees win
+(B1 0.789) and the GAT (0.605) is below its MLP control (0.718).
 
 `data/`, `cache/`, `results/`, `figures/` and `logs/` are gitignored. The figures used by the README are copied into
 `docs/figures/`. Raw results lived only on the laptop; rerun the pipeline to regenerate them (commands at the end of
@@ -26,7 +27,7 @@ control (0.718).
 ```bash
 pip install -r requirements.txt     # plus the CUDA build of torch from pytorch.org for a GPU
 python scripts/make_synthetic_paysim.py
-python -m pytest tests -q          # expect 20 passed, 1 skipped
+python -m pytest tests -q          # expect 22 passed, 1 skipped
 ```
 
 PaySim: download the zip from Kaggle (`ealaxi/paysim1`) and unzip the CSV into `data/`
@@ -50,8 +51,8 @@ Resume: `src.baselines`, `src.train_gat` and `src.elliptic` skip (model, mode, s
 
 1. PyG cross-check (`scripts/check_pyg_sampler.py`, `tests/test_pyg_sampler.py`) is still unverified: `pyg-lib` has no
    Windows wheel for torch 2.15. It runs on Colab (notebook cell 4b) or Linux.
-2. Validation and test disagree on PaySim (B1 better on validation, GAT on test). The splits' fraud rates differ a lot
-   (1.5% vs 3.6%). A rolling-origin evaluation (several train/test cut points) would settle whether the GAT gain is real.
+2. Resolved: the validation/test disagreement on PaySim was checked with a rolling-origin evaluation
+   (`python -m scripts.rolling_origin`, results in `results/rolling/`); B1 wins 3 of 4 windows.
 3. The PaySim GAT was not tuned; a validation-only grid like `scripts/tune_elliptic.py` would make the comparison
    symmetric with Elliptic.
 4. The Colab notebook (`notebooks/run_on_colab.ipynb`) has not been run end to end; everything was run locally instead.

@@ -20,6 +20,7 @@ data:
 split:                        # contiguous temporal ranges on `step`
   train_end_step: 500         # train: step <= 500
   val_end_step: 620           # val: 500 < step <= 620, test: step > 620
+  test_end_step: null         # optional end of the test window (used by scripts/rolling_origin.py)
   reference_max_step: 743     # used to rescale the boundaries when max_rows truncates the data
   scale_with_max_rows: true
   min_frauds_per_split: 20    # fail loudly if any split has fewer frauds

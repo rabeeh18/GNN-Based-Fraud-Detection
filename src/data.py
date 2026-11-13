@@ -111,7 +111,7 @@ def prepare_dataset(cfg: dict, use_cache: bool = True) -> Dataset:
             meta.to_parquet(cache / "meta.parquet")
             X.to_parquet(cache / "features.parquet")
     a, b = split_boundaries(cfg, int(meta["step"].max()))
-    split = make_split(meta["step"].to_numpy(), a, b)
+    split = make_split(meta["step"].to_numpy(), a, b, cfg["split"].get("test_end_step"))
     check_splits(meta["step"].to_numpy(), meta["isFraud"].to_numpy(), split, cfg["split"]["min_frauds_per_split"])
     present = [t for t in ALL_TYPES if (meta["type"] == t).any()]
     return Dataset(meta=meta, X=X, split=split, num_nodes=num_nodes, types_present=present, boundaries=(a, b))

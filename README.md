@@ -5,13 +5,14 @@ non-graph models, including gradient boosting that is *given* hand-crafted, past
 evaluated on a strict temporal split, with five seeds per model, and with an identical-architecture **MLP control** so
 that "the graph helped" can be separated from "a neural network helped".
 
-**Answer in one paragraph.** On PaySim, once the balance columns that leak the label are removed, the GAT has the best
-test PR-AUC: **0.652 ± 0.004 vs 0.635 ± 0.007** for XGBoost with graph features (B1), and it is ahead in all five paired
-seeds. The gain is small (+0.017 PR-AUC, +0.075 recall at 50% precision), comes with no gain at 90% precision, and B1 is
-better on the *validation* split, so a validation-based model choice would have picked B1. On Elliptic (real Bitcoin
-transactions), the GAT does **not** help: tree models are best (B1 0.789), and the GAT (0.605) is even below its own
-no-graph MLP control (0.718). Neighbourhood information helps on both datasets when supplied as features (B1 > B0);
-learned message passing helps a little on one dataset and hurts on the other.
+**Answer in one paragraph.** Graph information clearly helps: past-only neighbourhood features lift XGBoost from
+0.49 to 0.64 PR-AUC on PaySim (once the balance columns that leak the label are removed). A GATv2 that learns from the
+graph end-to-end, however, does **not** reliably beat XGBoost with those features (B1). On the main PaySim split the GAT
+is ahead (**0.652 ± 0.004 vs 0.635 ± 0.007**, 5/5 paired seeds), but B1 is better on that split's validation data, and a
+rolling-origin check on three earlier time windows reverses the result: **B1 wins all three, on validation and on test**
+(GAT ahead in 1 of 9 paired runs). On Elliptic (real Bitcoin transactions), tree models are best (B1 0.789) and the GAT
+(0.605) is below its own no-graph MLP control (0.718). The one consistent graph effect inside the neural models is small:
+on PaySim the GAT is 0.004-0.04 PR-AUC above the identical network without neighbours in all four time windows.
 
 * **PaySim** (Kaggle `ealaxi/paysim1`): synthetic mobile-money log, 6.36M transactions. Accounts = nodes, transactions =
   directed edges; task = **edge classification** (`isFraud`).
@@ -34,6 +35,7 @@ src/evaluate.py               metrics, validation-only thresholds, seed aggregat
 src/error_analysis.py plots.py            GAT-vs-B1 error analysis, result figures
 src/elliptic.py               second dataset: Elliptic (B0, B0b, B1, MLP, GAT), same metrics and protocol
 scripts/tune_elliptic.py      validation-only hyper-parameter grid for the Elliptic GAT / MLP
+scripts/rolling_origin.py     PaySim rolling-origin check: B0/B1/MLP/GAT retrained on three earlier time windows
 scripts/make_synthetic_paysim.py          small PaySim-shaped data for smoke tests
 scripts/make_colab_notebook.py            regenerates notebooks/run_on_colab.ipynb
 docs/diagrams/                reproducible diagram scripts (PNG + SVG): python docs/diagrams/make_all.py
@@ -152,7 +154,7 @@ How to read it:
 * **GAT vs MLP (same network, no neighbours):** +0.037 mean PR-AUC and about 10x lower seed variance, but ahead in only
   3/5 paired seeds. Message passing makes the network more reliable more than it makes it much better.
 * **Caveat: validation disagrees.** On validation, B1 has PR-AUC 0.558 vs 0.489 for the GAT, so a validation-based
-  model choice would have picked B1. The very different fraud rates of the two splits (1.5% vs 3.6%) are a likely reason.
+  model choice would have picked B1. The rolling-origin check below shows the test-split win does not generalise.
 * **What the GAT catches that B1 does not** (`python -m src.error_analysis`, seed 0, at 90% precision): 75 frauds are
   caught only by the GAT and 76 only by B1. The GAT-only frauds go to receivers with much more history (3.7 earlier
   transactions on average vs 0.1 for the B1-only ones) and are smaller (median 0.40M vs 1.70M). The GAT uses the
@@ -161,6 +163,27 @@ How to read it:
 ![summary](docs/figures/summary_bars.png)
 ![PR curves](docs/figures/pr_curves_nobalance.png)
 ![attention](docs/figures/neighborhood_GAT_nobalance_seed0.png)
+
+### PaySim rolling-origin check (`python -m scripts.rolling_origin`)
+
+One test window can be lucky, so B0, B1, MLP and GAT were retrained from scratch on three earlier windows: train on
+steps 1..T, validate on the next 80 steps, test on the 80 after that (T = 300, 380, 460), without balance features,
+seeds 0-2, same settings as above. Later steps are excluded from every split (`split.test_end_step`).
+
+| Test window (steps) | test frauds | B0 | B1 | MLP | GAT | GAT - B1, test (wins) | GAT - B1, val (wins) |
+|---|---|---|---|---|---|---|---|
+| 381-460 | 916 | 0.298 | **0.466** | 0.361 | 0.368 | -0.097 (0/3) | -0.342 (0/3) |
+| 461-540 | 838 | 0.400 | **0.524** | 0.499 | 0.503 | -0.021 (1/3) | -0.125 (0/3) |
+| 541-620 | 856 | 0.406 | **0.577** | 0.494 | 0.504 | -0.074 (0/3) | -0.031 (0/3) |
+| 621-743 (main split, seeds 0-2) | 1,366 | 0.489 | 0.637 | 0.629 | **0.650** | +0.013 (3/3) | -0.069 (0/3) |
+
+* B1 is the best model in 3 of 4 windows, and on validation in all 4. The GAT's win on the main split is specific to that period.
+* GAT ≥ MLP in every window (+0.004 to +0.021 here): message passing adds a little to the neural model, but not enough
+  to catch up with gradient boosting on hand-made graph features.
+* The earliest window is hardest for the neural models: its validation period has a fraud rate of only 0.13%
+  (vs 1.9% later), which makes early stopping on validation PR-AUC very noisy.
+
+![rolling origin](docs/figures/rolling_origin.png)
 
 ### Elliptic results (`python -m src.elliptic`)
 
@@ -188,11 +211,12 @@ grid on **validation** PR-AUC only (`scripts/tune_elliptic.py`, results in `resu
 
 ### Conclusion
 
-Graph context is valuable for fraud detection on both datasets, but most of that value is captured by simple
-past-only neighbourhood aggregates fed to gradient boosting. A GATv2 trained end-to-end adds a small, consistent gain
-on PaySim (where the useful structure is the receiver's history) and is worse on Elliptic, where it does not
-generalise across time. In practice: build the graph features first, and use a GNN only when it beats that baseline on
-a time-respecting validation split, which it did not do reliably here.
+Graph context is valuable for fraud detection on both datasets, but its value is captured best by simple past-only
+neighbourhood aggregates fed to gradient boosting. A GATv2 trained end-to-end beat that baseline in one of four PaySim
+time windows and on neither validation nor test anywhere else, and it is worse on Elliptic, where what it learns
+does not generalise across time. Inside the neural models, message passing gives a small but consistent gain over the
+same network without neighbours. In practice: build the graph features first, and evaluate any GNN on several
+time-respecting windows; a single temporal split was enough here to produce a misleading "GNN wins" result.
 
 ### Checks that the results are not artefacts
 
@@ -202,13 +226,15 @@ a time-respecting validation split, which it did not do reliably here.
   `gat.sanity.epochs` is 2000.
 * XGBoost early stopping: with a patience of 40 rounds some seeds stopped after 2-8 trees on the noisy validation
   PR-AUC (one Elliptic B1 seed scored 0.36). All XGBoost results above use a patience of 100, so the baselines are not handicapped.
-* Same-network control (MLP) on both datasets, 5 seeds everywhere, and a paired per-seed comparison for the headline claim.
+* Same-network control (MLP) on both datasets, 5 seeds on the main splits, paired per-seed comparisons, and a
+  rolling-origin check over three more PaySim time windows (3 seeds each).
 
 ## Limitations
 
 * PaySim is synthetic and its graph is extremely sparse. Elliptic is real but labels only 23% of nodes and is a
   different task (node, not edge, classification). Conclusions are about these two datasets.
-* The PaySim GAT advantage is small and not confirmed by the validation split (see above); treat it as suggestive, not settled.
+* The rolling-origin windows use 3 seeds and 80-step validation/test windows; the main split uses 5 seeds and longer
+  windows (120 / 123 steps), so the windows are comparable in design but not identical.
 * Strict "step < t" visibility discards genuinely useful same-step history (for example a fraudulent transfer and its
   cash-out inside one hour); this is the price of the leakage-safe choice.
 * The PaySim GAT hyper-parameters were fixed before seeing results and not tuned; only the Elliptic GAT/MLP were tuned (on validation).
@@ -232,6 +258,7 @@ python -m src.train_gat --data_path $D --sanity_overfit --use_balance false
 python -m src.train_gat --data_path $D --use_balance both --seeds 0 1 2 3 4
 python -m src.train_gat --data_path $D --use_balance both --seeds 0 1 2 3 4 --no_graph   # MLP control
 python -m src.elliptic --seeds 0 1 2 3 4        # downloads Elliptic via PyG on first use
+python -m scripts.rolling_origin --data_path $D   # three extra time windows, seeds 0-2 (~20 min on a laptop GPU)
 python -m src.evaluate
 python -m src.error_analysis --data_path $D --seeds 0 --precision 0.9
 python -m src.plots --data_path $D

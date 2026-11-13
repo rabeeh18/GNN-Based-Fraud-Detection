@@ -8,6 +8,7 @@ from .utils import get_logger
 
 log = get_logger()
 TRAIN, VAL, TEST = 0, 1, 2
+UNUSED = -1                       # rows after split.test_end_step (rolling-origin evaluation)
 SPLIT_NAMES = {TRAIN: "train", VAL: "val", TEST: "test"}
 
 
@@ -33,10 +34,18 @@ def split_boundaries(cfg: dict, max_step: int | None = None) -> tuple[int, int]:
     return a, b
 
 
-def make_split(step: np.ndarray, train_end: int, val_end: int) -> np.ndarray:
-    """Split id per row: 0 = step <= train_end, 1 = train_end < step <= val_end, 2 = step > val_end."""
+def make_split(step: np.ndarray, train_end: int, val_end: int, test_end: int | None = None) -> np.ndarray:
+    """Split id per row: 0 = step <= train_end, 1 = train_end < step <= val_end, 2 = val_end < step (<= test_end).
+
+    Rows after ``test_end`` (if given) get -1 and belong to no split. They stay in the graph, but the
+    past-only rule means no feature or sampled neighbourhood of an earlier row can see them.
+    """
     step = np.asarray(step)
     s = np.full(len(step), TEST, dtype=np.int8)
+    if test_end is not None:
+        if test_end <= val_end:
+            raise SplitError(f"test_end_step={test_end} must be > val_end_step={val_end}")
+        s[step > test_end] = UNUSED
     s[step <= val_end] = VAL
     s[step <= train_end] = TRAIN
     return s
