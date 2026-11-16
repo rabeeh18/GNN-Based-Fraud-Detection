@@ -99,7 +99,7 @@ def summarize(results_dir: str | Path) -> pd.DataFrame:
     out = out.reset_index()
     for c in cols:
         out[f"{c}_fmt"] = [f"{m:.4f} ± {0.0 if pd.isna(s) else s:.4f}" for m, s in zip(out[f"{c}_mean"], out[f"{c}_std"])]
-    order = {"FlaggedRule": 0, "B0": 1, "B0b": 2, "B1": 3, "MLP": 4, "GAT": 5}
+    order = {"FlaggedRule": 0, "B0": 1, "B0b": 2, "B1": 3, "MLP": 4, "XGB": 5, "XGB+graph": 6, "GAT": 7, "Hybrid": 8}
     out["_o"] = out["model"].map(order).fillna(9)
     out = out.sort_values(["mode", "_o"]).drop(columns="_o")
     out.to_csv(rd / SUMMARY, index=False)

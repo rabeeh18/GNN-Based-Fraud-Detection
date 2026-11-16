@@ -109,3 +109,20 @@ elliptic:                     # second dataset (python -m src.elliptic); results
     hidden: 64
     dropout: 0.5
     lr: 0.003
+
+btc:                          # Bitcoin part (Elliptic++): python -m src.btc.transactions / src.btc.wallets
+  data_dir: data/ellipticpp   # files from the Google Drive folder linked at github.com/git-disl/EllipticPlusPlus
+  hybrid_folds: 4             # time-step blocks used for the out-of-fold GAT scores fed to the hybrid
+  gat:                        # same settings as the tuned Elliptic GAT (scripts/tune_elliptic.py)
+    hidden: 128
+    heads: 2
+    num_layers: 2
+    dropout: 0.2
+    lr: 0.001
+    weight_decay: 1.0e-4
+    epochs: 1000
+    patience: 100
+  wallet_gat:                 # overrides for the wallet graph (about 1.1M nodes, does not fit 8 GB at hidden 128)
+    hidden: 64
+    patience: 40              # shorter, so 5 seeds x 2 tasks fit in one night
+  wallet_hybrid_folds: 2

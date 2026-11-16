@@ -1,4 +1,111 @@
-# Does graph learning help fraud detection? GATv2 vs. strong non-graph models on PaySim and Elliptic
+# Catching criminal Bitcoin transactions and wallets with graph learning (Elliptic++)
+
+**What this project does.** On real Bitcoin data (Elliptic++, Elmougy & Liu, KDD 2023: 203,769 transactions,
+822,942 wallets, 49 time steps of about two weeks each), it answers three questions with the same four models:
+
+1. **Criminal transactions:** is this transaction illicit?
+2. **Criminal wallets:** is this wallet (address) involved in illicit activity?
+3. **Early warning:** can a criminal wallet be flagged **the first time it appears**, before it has a history?
+
+It also has an **investigator demo** (Streamlit): pick a wallet, see its risk score, why the model gave that score,
+and its money trail (its transactions and the other wallets in them).
+
+Models, the same four in every part:
+
+| Model | What it sees |
+|---|---|
+| **XGB** | XGBoost on the item's own features only |
+| **XGB+graph** | XGBoost on own features + neighbourhood features (what its transactions / neighbours look like) |
+| **GAT** | GATv2 graph neural network that learns from the graph itself |
+| **Hybrid** | XGB+graph plus the GAT's score as one extra feature (stacked with out-of-fold GAT scores) |
+
+Everything is split **by time**: train on steps 1-29, choose thresholds/early stopping on 30-34, test on 35-49.
+5 seeds per model. The main metric is **PR-AUC** (accuracy is meaningless here: ~90-96% of items are legitimate);
+also recall at 90% precision and F1 at the threshold chosen on validation.
+
+### Results (test steps 35-49, mean ± std over 5 seeds)
+
+| Task | XGB | XGB+graph | GAT | Hybrid |
+|---|---|---|---|---|
+| Criminal transactions, PR-AUC | 0.767 ± 0.003 | **0.795 ± 0.001** | 0.668 ± 0.039 | 0.792 ± 0.002 |
+| Criminal wallets, PR-AUC | 0.214 ± 0.006 | **0.599 ± 0.009** | 0.362 ± 0.043 | 0.556 ± 0.088 |
+| Early warning (first appearance), PR-AUC | 0.208 ± 0.018 | **0.592 ± 0.007** | 0.365 ± 0.047 | 0.528 ± 0.073 |
+| Criminal wallets, recall at 90% precision | 0.003 | **0.413** | 0.054 | 0.312 |
+| Early warning, recall at 90% precision | 0.001 | **0.365** | 0.063 | 0.250 |
+
+(Transactions: F1 of XGB+graph 0.804, recall at 90% precision 0.723. Test wallets: 120,567 labelled, 4,889 criminal = 4%.)
+
+![btc results](docs/figures/btc_results.png)
+
+**What the results say**
+
+* **The graph is what makes wallets catchable.** A wallet's own activity (counts, age, counterparties) gives PR-AUC
+  0.21. Adding what its transactions look like gives **0.60**, almost 3x. The GAT, which only learns from the graph,
+  also beats own-features XGB (0.36 vs 0.21).
+* **Early warning works almost as well as waiting.** Scoring a wallet at its very first appearance gives 0.59, vs
+  0.60 when using everything it did in its window: most of the signal is in the transactions it takes part in, not
+  in its history.
+* **The best way to use the graph is XGBoost with neighbourhood features**, not an end-to-end GNN. Adding the GAT's
+  score (Hybrid) does not help: equal on transactions, and worse and less stable on wallets (the wallet GAT's
+  validation scores do not carry over to the test period). This matches the earlier PaySim/Elliptic study below.
+* After test step 43 criminal transactions become almost invisible: XGB+graph catches 83% of them in steps 35-43
+  but 3% in steps 44-49 (the dark-market shutdown known from the original Elliptic data changes criminal behaviour).
+
+### The provided wallet features have a problem (and the paper's wallet score could not be reproduced)
+
+Elliptic++ ships wallet features that are **lifetime totals**: the same row is repeated for every time step a wallet
+appears in, including steps in the future. With the paper's protocol (rows from steps 1-34 for training, 35-49 for
+test), 7,460 test rows belong to wallets that also have training rows with identical features and the same label.
+
+* On those wallets the models score PR-AUC **0.99** (they recognise the wallet). On new wallets: **0.46**.
+* Overall we get F1 0.45 (XGB) / 0.42 (Random Forest), not the 0.845 the paper reports for Random Forest. We could
+  not reproduce that number; we do not claim to know why.
+* So this project **rebuilds wallet features from the past only** (12 cumulative activity features + summaries of
+  the wallet's transactions at that time) and splits **each wallet once** by when it first appears. The labels also
+  only use transactions up to the end of each wallet's period. Tests check both (`tests/test_btc.py`).
+
+![wallet features](docs/figures/btc_wallet_features.png)
+
+### Investigator demo
+
+```bash
+pip install -r requirements.txt
+python -m src.btc.export_demo          # once: writes results/btc/demo/ (needs the runs below)
+streamlit run app/investigator.py
+```
+
+The demo uses XGB+graph (best on validation) for both wallets and transactions, so every score comes with
+XGBoost feature contributions ("why this score"). The money trail colours transactions and neighbouring wallets by
+risk; true labels are hidden unless "Reveal the true label" is ticked.
+
+### Run the Elliptic++ part
+
+```bash
+# data: download the Elliptic++ files (https://github.com/git-disl/EllipticPlusPlus) into data/ellipticpp/
+python -m src.btc.transactions         # part 1
+python -m src.btc.wallets              # parts 2-3 (~4 h; the wallet graph has ~1.1M nodes)
+python -m src.btc.wallet_leak          # provided-feature check above (minutes)
+python -m src.btc.export_demo
+python -m src.btc.plots                # figures/btc_*.png
+```
+
+Code: `src/btc/` (data, wallets, transactions, gnn, wallet_leak, export_demo, plots), `app/investigator.py`.
+
+### Limitations of this part
+
+* Wallet labels follow the dataset's rule: a wallet is criminal if it is linked to an illicit transaction. So
+  wallet detection is partly "finding the wallets around criminal transactions", and labels are only as good as
+  the transaction labels (about 77% of transactions are unlabelled).
+* The wallet GAT is smaller (hidden 64, early-stopping patience 40, 2 stacking folds) so that it fits an 8 GB GPU and
+  a night of compute; a larger GAT might do better.
+* One dataset, one time split (no rolling-origin check for this part).
+
+---
+
+# Earlier study: does graph learning help fraud detection? GATv2 vs. strong non-graph models on PaySim and Elliptic
+
+This was the first phase of the project. Its lesson (graph features in XGBoost beat an end-to-end GNN, and a single
+time split can mislead) shaped the Elliptic++ design above.
 
 **Question.** Does an attention-based graph neural network (GATv2) that learns from the transaction graph beat strong
 non-graph models, including gradient boosting that is *given* hand-crafted, past-only graph features? Everything is
